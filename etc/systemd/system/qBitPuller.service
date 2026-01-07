@@ -5,4 +5,5 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+Environment=PYTHONIOENCODING=utf-8
 ExecStart=/usr/bin/python3 /usr/local/bin/qBitPuller.py
