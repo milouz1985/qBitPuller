@@ -144,7 +144,6 @@ def run_rclone_copy(cfg: Config, src: str, dst: str) -> None:
         "5",
         "--retries-sleep",
         "10s",
-        "--partial",
         "--ignore-existing",
         "--log-level",
         "INFO",
