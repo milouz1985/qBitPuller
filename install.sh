@@ -6,7 +6,7 @@ ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 install -m 0755 "$ROOT_DIR/usr/local/bin/qBitPuller.py" /usr/local/bin/qBitPuller.py
 
 if [ ! -f /etc/qBitPuller.env ]; then
-  install -m 0644 "$ROOT_DIR/etc/qBitPuller.env" /etc/qBitPuller.env
+  install -m 0600 "$ROOT_DIR/etc/qBitPuller.env" /etc/qBitPuller.env
 else
   echo "Skipping /etc/qBitPuller.env (already exists)"
 fi
