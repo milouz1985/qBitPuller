@@ -11,6 +11,16 @@ from typing import List, Dict, Any
 import requests
 
 
+DONE_STATES = {
+    "uploading",
+    "stalledUP",
+    "pausedUP",
+    "queuedUP",
+    "checkingUP",
+    "forcedUP",
+}
+
+
 @dataclass
 class Config:
     qb_url: str
@@ -20,6 +30,7 @@ class Config:
     rclone_remote: str
     rclone_src_root: str
     dest_root: str
+    categories: List[str]
 
     pulled_tag: str = "pulled"
     rclone_config: str = ""
@@ -56,6 +67,11 @@ def get_config() -> Config:
             raise SystemExit(f"Config manquante: {key} dans {env_path} ou variables d'environnement")
         return val
 
+    categories_raw = env.get("CATEGORIES") or os.environ.get("CATEGORIES") or "radarr,sonarr"
+    categories = [c.strip() for c in categories_raw.split(",") if c.strip()]
+    if not categories:
+        raise SystemExit("Config manquante: CATEGORIES est vide")
+
     return Config(
         qb_url=req("QB_URL").rstrip("/") + "/",
         qb_user=req("QB_USER"),
@@ -63,6 +79,7 @@ def get_config() -> Config:
         rclone_remote=req("RCLONE_REMOTE"),
         rclone_src_root=req("RCLONE_SRC_ROOT").rstrip("/"),
         dest_root=req("DEST_ROOT").rstrip("/"),
+        categories=categories,
         pulled_tag=(env.get("PULLED_TAG") or os.environ.get("PULLED_TAG") or "pulled"),
         rclone_config=(env.get("RCLONE_CONFIG") or os.environ.get("RCLONE_CONFIG") or ""),
     )
@@ -99,7 +116,12 @@ class QbClient:
 def is_done(t: Dict[str, Any]) -> bool:
     # progress == 1.0 est le critère le plus simple et fiable
     try:
-        return float(t.get("progress", 0.0)) >= 1.0
+        if float(t.get("progress", 0.0)) < 1.0:
+            return False
+        state = (t.get("state") or "").strip()
+        if state and state not in DONE_STATES:
+            return False
+        return True
     except Exception:
         return False
 
@@ -125,14 +147,15 @@ def build_src_path(cfg: Config, content_path: str) -> str:
     if cp == root:
         return f"{cfg.rclone_remote}:{root}"
 
-    base = os.path.basename(cp)
-    return f"{cfg.rclone_remote}:{root}/{base}"
+    return ""
 
 
 def run_rclone_copy(cfg: Config, src: str, dst: str) -> None:
     os.makedirs(dst, exist_ok=True)
 
     cmd = [
+        "timeout",
+        "90m",
         "rclone",
         "copy",
         src,
@@ -155,6 +178,8 @@ def run_rclone_copy(cfg: Config, src: str, dst: str) -> None:
     log("rclone: " + " ".join(shlex.quote(x) for x in cmd))
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if p.returncode != 0:
+        if p.returncode == 124:
+            raise RuntimeError(f"rclone timeout apres 90m (code {p.returncode})\n{p.stdout}")
         raise RuntimeError(f"rclone a échoué (code {p.returncode})\n{p.stdout}")
 
 
@@ -177,7 +202,7 @@ def main() -> int:
     wanted = []
     for t in torrents:
         cat = (t.get("category") or "").strip()
-        if cat not in ("radarr", "sonarr"):
+        if cat not in cfg.categories:
             continue
         if not is_done(t):
             continue
@@ -202,6 +227,9 @@ def main() -> int:
             continue
 
         src = build_src_path(cfg, content_path)
+        if not src:
+            log(f"Skip {name} car content_path ne matche pas RCLONE_SRC_ROOT: {content_path}")
+            continue
         dst = os.path.join(cfg.dest_root, cat, name)
 
         log(f"Copy {cat}: {name}")
