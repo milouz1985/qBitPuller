@@ -26,6 +26,7 @@ class Config:
     qb_url: str
     qb_user: str
     qb_pass: str
+    qb_timeout: int
 
     rclone_remote: str
     rclone_src_root: str
@@ -34,10 +35,16 @@ class Config:
 
     pulled_tag: str = "pulled"
     rclone_config: str = ""
+    log_level: str = "INFO"
 
 
 def log(msg: str) -> None:
     print(f"[qBitPuller] {msg}", flush=True)
+
+
+def debug_log(cfg: Config, msg: str) -> None:
+    if cfg.log_level == "DEBUG":
+        log(msg)
 
 
 def load_env(path: str) -> Dict[str, str]:
@@ -71,17 +78,26 @@ def get_config() -> Config:
     categories = [c.strip() for c in categories_raw.split(",") if c.strip()]
     if not categories:
         raise SystemExit("Config manquante: CATEGORIES est vide")
+    try:
+        qb_timeout = int(req("QB_TIMEOUT"))
+    except ValueError:
+        raise SystemExit("Config invalide: QB_TIMEOUT doit etre un entier (secondes)")
+    log_level = req("LOG_LEVEL").strip().upper()
+    if log_level not in ("INFO", "DEBUG"):
+        raise SystemExit("Config invalide: LOG_LEVEL doit etre INFO ou DEBUG")
 
     return Config(
         qb_url=req("QB_URL").rstrip("/") + "/",
         qb_user=req("QB_USER"),
         qb_pass=req("QB_PASS"),
+        qb_timeout=qb_timeout,
         rclone_remote=req("RCLONE_REMOTE"),
         rclone_src_root=req("RCLONE_SRC_ROOT").rstrip("/"),
         dest_root=req("DEST_ROOT").rstrip("/"),
         categories=categories,
-        pulled_tag=(env.get("PULLED_TAG") or os.environ.get("PULLED_TAG") or "pulled"),
+        pulled_tag=req("PULLED_TAG"),
         rclone_config=(env.get("RCLONE_CONFIG") or os.environ.get("RCLONE_CONFIG") or ""),
+        log_level=log_level,
     )
 
 
@@ -194,7 +210,7 @@ def main() -> int:
         log("Deja en cours, on quitte")
         return 0
 
-    qb = QbClient(cfg.qb_url, cfg.qb_user, cfg.qb_pass)
+    qb = QbClient(cfg.qb_url, cfg.qb_user, cfg.qb_pass, timeout=cfg.qb_timeout)
     log("Login qBittorrent")
     qb.login()
 
@@ -203,10 +219,14 @@ def main() -> int:
     for t in torrents:
         cat = (t.get("category") or "").strip()
         if cat not in cfg.categories:
+            if cat:
+                debug_log(cfg, f"Skip {t.get('name') or 'unknown'} car categorie ignoree: {cat}")
             continue
         if not is_done(t):
+            debug_log(cfg, f"Skip {t.get('name') or 'unknown'} car pas termine (progress/state)")
             continue
         if has_tag(t, cfg.pulled_tag):
+            debug_log(cfg, f"Skip {t.get('name') or 'unknown'} car tag deja present: {cfg.pulled_tag}")
             continue
         wanted.append(t)
 
@@ -224,6 +244,9 @@ def main() -> int:
 
         if not h:
             log(f"Skip {name} car hash manquant")
+            continue
+        if not content_path:
+            log(f"Skip {name} car content_path vide")
             continue
 
         src = build_src_path(cfg, content_path)
