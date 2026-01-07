@@ -4,6 +4,7 @@ import sys
 import time
 import shlex
 import subprocess
+import fcntl
 from dataclasses import dataclass
 from typing import List, Dict, Any
 
@@ -159,6 +160,14 @@ def run_rclone_copy(cfg: Config, src: str, dst: str) -> None:
 
 def main() -> int:
     cfg = get_config()
+    lock_path = "/var/lock/qBitPuller.lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_fh = open(lock_path, "w", encoding="utf-8")
+    try:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("Deja en cours, on quitte")
+        return 0
 
     qb = QbClient(cfg.qb_url, cfg.qb_user, cfg.qb_pass)
     log("Login qBittorrent")
