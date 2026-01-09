@@ -5,7 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=/etc/qBitPuller.env
+EnvironmentFile=/etc/qBitPuller/qBitPuller.env
+LoadCredential=rclone.conf:/etc/qBitPuller/rclone.conf
+Environment=RCLONE_CONFIG=%d/rclone.conf
 User=qbitpuller
 Group=media
 UMask=0002
