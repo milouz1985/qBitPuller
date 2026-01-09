@@ -47,34 +47,16 @@ def debug_log(cfg: Config, msg: str) -> None:
         log(msg)
 
 
-def load_env(path: str) -> Dict[str, str]:
-    env: Dict[str, str] = {}
-    if not os.path.exists(path):
-        return env
-
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            s = line.strip()
-            if not s or s.startswith("#"):
-                continue
-            if "=" not in s:
-                continue
-            k, v = s.split("=", 1)
-            env[k.strip()] = v.strip().strip('"').strip("'")
-    return env
-
-
 def get_config() -> Config:
-    env_path = "/etc/qBitPuller.env"
-    env = load_env(env_path)
+    env = dict(os.environ)
 
     def req(key: str) -> str:
-        val = env.get(key) or os.environ.get(key)
+        val = env.get(key)
         if not val:
-            raise SystemExit(f"Config manquante: {key} dans {env_path} ou variables d'environnement")
+            raise SystemExit(f"Config manquante: {key} dans les variables d'environnement")
         return val
 
-    categories_raw = env.get("CATEGORIES") or os.environ.get("CATEGORIES") or "radarr,sonarr"
+    categories_raw = env.get("CATEGORIES") or "radarr,sonarr"
     categories = [c.strip() for c in categories_raw.split(",") if c.strip()]
     if not categories:
         raise SystemExit("Config manquante: CATEGORIES est vide")
@@ -96,7 +78,7 @@ def get_config() -> Config:
         dest_root=req("DEST_ROOT").rstrip("/"),
         categories=categories,
         pulled_tag=req("PULLED_TAG"),
-        rclone_config=(env.get("RCLONE_CONFIG") or os.environ.get("RCLONE_CONFIG") or ""),
+        rclone_config=(env.get("RCLONE_CONFIG") or ""),
         log_level=log_level,
     )
 
