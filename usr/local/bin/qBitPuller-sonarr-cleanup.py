@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 import fcntl
 from dataclasses import dataclass
 from typing import Dict, List, Set
@@ -19,6 +20,7 @@ class Config:
     dry_run: bool
     min_age_minutes: int
     clean_empty_dirs: bool
+    history_since_days: int
 
 
 def log(msg: str) -> None:
@@ -54,6 +56,10 @@ def get_config() -> Config:
         min_age_minutes = int(env.get("SONARR_MIN_AGE_MINUTES", "60"))
     except ValueError:
         raise SystemExit("Config invalide: SONARR_MIN_AGE_MINUTES doit etre un entier (minutes)")
+    try:
+        history_since_days = int(env.get("SONARR_HISTORY_SINCE_DAYS", "14"))
+    except ValueError:
+        raise SystemExit("Config invalide: SONARR_HISTORY_SINCE_DAYS doit etre un entier (jours)")
 
     dest_root = os.path.realpath(req("DEST_ROOT"))
     sonarr_subdir = (env.get("SONARR_SUBDIR") or "sonarr").strip().strip("/")
@@ -69,6 +75,7 @@ def get_config() -> Config:
         dry_run=dry_run,
         min_age_minutes=min_age_minutes,
         clean_empty_dirs=clean_empty_dirs,
+        history_since_days=history_since_days,
     )
 
 
@@ -101,17 +108,20 @@ class SonarrClient:
             },
         )
 
-    def history_series(self, event_type: str) -> List[Dict]:
+    def history_since(self, date_iso: str, event_type: str) -> List[Dict]:
         return self.get(
-            "history/series",
+            "history/since",
             params={
+                "date": date_iso,
                 "eventType": event_type,
             },
         )
 
-def build_imported_paths(client: SonarrClient) -> List[str]:
+def build_imported_paths(client: SonarrClient, since_days: int) -> List[str]:
     paths: Set[str] = set()
-    records = client.history_series(event_type="downloadFolderImported")
+    since_dt = datetime.now(timezone.utc) - timedelta(days=since_days)
+    date_iso = since_dt.isoformat().replace("+00:00", "Z")
+    records = client.history_since(date_iso=date_iso, event_type="downloadFolderImported")
     for rec in records:
         rec_data = rec.get("data") or {}
         src = rec_data.get("sourcePath") or ""
@@ -163,8 +173,8 @@ def main() -> int:
 
     log("Lecture Sonarr...")
     client = SonarrClient(cfg.sonarr_url, cfg.sonarr_api_key, timeout=cfg.sonarr_timeout)
-    imported_paths = build_imported_paths(client)
-    log(f"Imports trouves via history: {len(imported_paths)}")
+    imported_paths = build_imported_paths(client, cfg.history_since_days)
+    log(f"Imports trouves via history/since: {len(imported_paths)}")
 
     now = time.time()
     min_age_seconds = max(0, cfg.min_age_minutes * 60)
