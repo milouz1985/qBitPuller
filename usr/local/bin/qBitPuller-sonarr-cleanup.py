@@ -92,34 +92,31 @@ class SonarrClient:
     def episode_files_for_series(self, series_id: int) -> List[Dict]:
         return self.get("episodefile", params={"seriesId": str(series_id)})
 
-    def history(self, page: int, page_size: int, event_type: str) -> Dict:
+    def history(self, page: int, page_size: int) -> Dict:
         return self.get(
             "history",
             params={
                 "page": str(page),
                 "pageSize": str(page_size),
+            },
+        )
+
+    def history_series(self, event_type: str) -> List[Dict]:
+        return self.get(
+            "history/series",
+            params={
                 "eventType": event_type,
             },
         )
 
 def build_imported_paths(client: SonarrClient) -> List[str]:
-    page = 1
-    page_size = 200
     paths: Set[str] = set()
-    while True:
-        data = client.history(page=page, page_size=page_size, event_type="downloadFolderImported")
-        records = data.get("records") or []
-        for rec in records:
-            rec_data = rec.get("data") or {}
-            src = rec_data.get("sourcePath") or ""
-            if src:
-                paths.add(src)
-        total = data.get("totalRecords")
-        if total is None:
-            break
-        if page * page_size >= int(total):
-            break
-        page += 1
+    records = client.history_series(event_type="downloadFolderImported")
+    for rec in records:
+        rec_data = rec.get("data") or {}
+        src = rec_data.get("sourcePath") or ""
+        if src:
+            paths.add(src)
     return sorted(paths)
 
 
