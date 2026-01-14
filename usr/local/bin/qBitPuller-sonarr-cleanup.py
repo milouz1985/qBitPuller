@@ -121,10 +121,11 @@ def build_imported_paths(client: SonarrClient, since_days: int) -> List[str]:
     paths: Set[str] = set()
     since_dt = datetime.now(timezone.utc) - timedelta(days=since_days)
     date_iso = since_dt.isoformat().replace("+00:00", "Z")
+    log(f"Requete Sonarr: /api/v3/history/since?date={date_iso}&eventType=downloadFolderImported")
     records = client.history_since(date_iso=date_iso, event_type="downloadFolderImported")
     for rec in records:
         rec_data = rec.get("data") or {}
-        src = rec_data.get("sourcePath") or ""
+        src = rec_data.get("droppedPath") or rec_data.get("sourcePath") or ""
         if src:
             paths.add(src)
     return sorted(paths)
