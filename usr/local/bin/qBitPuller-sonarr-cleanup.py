@@ -4,7 +4,7 @@ import sys
 import time
 import fcntl
 from dataclasses import dataclass
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
 import requests
 
@@ -92,27 +92,42 @@ class SonarrClient:
     def episode_files_for_series(self, series_id: int) -> List[Dict]:
         return self.get("episodefile", params={"seriesId": str(series_id)})
 
+    def history(self, page: int, page_size: int, event_type: str) -> Dict:
+        return self.get(
+            "history",
+            params={
+                "page": str(page),
+                "pageSize": str(page_size),
+                "eventType": event_type,
+            },
+        )
 
-def build_episodefile_index(client: SonarrClient) -> Set[Tuple[str, int]]:
-    series_list = client.series()
-    index: Set[Tuple[str, int]] = set()
-    for s in series_list:
-        sid = s.get("id")
-        if sid is None:
-            continue
-        files = client.episode_files_for_series(int(sid))
-        for f in files:
-            path = f.get("path") or ""
-            size = f.get("size")
-            if not path or size is None:
-                continue
-            base = os.path.basename(path)
-            try:
-                size_i = int(size)
-            except (TypeError, ValueError):
-                continue
-            index.add((base, size_i))
-    return index
+def build_imported_paths(client: SonarrClient) -> List[str]:
+    page = 1
+    page_size = 200
+    paths: Set[str] = set()
+    while True:
+        data = client.history(page=page, page_size=page_size, event_type="downloadFolderImported")
+        records = data.get("records") or []
+        for rec in records:
+            rec_data = rec.get("data") or {}
+            src = rec_data.get("sourcePath") or ""
+            if src:
+                paths.add(src)
+        total = data.get("totalRecords")
+        if total is None:
+            break
+        if page * page_size >= int(total):
+            break
+        page += 1
+    return sorted(paths)
+
+
+def is_under_root(path: str, root: str) -> bool:
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
 
 
 def cleanup_empty_dirs(target_root: str, start_dir: str) -> None:
@@ -151,8 +166,8 @@ def main() -> int:
 
     log("Lecture Sonarr...")
     client = SonarrClient(cfg.sonarr_url, cfg.sonarr_api_key, timeout=cfg.sonarr_timeout)
-    index = build_episodefile_index(client)
-    log(f"Episode files en base: {len(index)}")
+    imported_paths = build_imported_paths(client)
+    log(f"Imports trouves via history: {len(imported_paths)}")
 
     now = time.time()
     min_age_seconds = max(0, cfg.min_age_minutes * 60)
@@ -161,34 +176,35 @@ def main() -> int:
     matched = 0
     deleted = 0
 
-    for root, dirs, files in os.walk(target_root, followlinks=False):
-        for name in files:
-            scanned += 1
-            path = os.path.join(root, name)
-            try:
-                st = os.stat(path)
-            except FileNotFoundError:
-                continue
-            if min_age_seconds and now - st.st_mtime < min_age_seconds:
-                continue
-            key = (name, int(st.st_size))
-            if key not in index:
-                continue
-            matched += 1
-            if cfg.dry_run:
-                log(f"DRY_RUN delete: {path}")
-                continue
-            try:
+    for src in imported_paths:
+        scanned += 1
+        path = os.path.realpath(src)
+        if not is_under_root(path, target_root):
+            continue
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            continue
+        if min_age_seconds and now - st.st_mtime < min_age_seconds:
+            continue
+        matched += 1
+        if cfg.dry_run:
+            log(f"DRY_RUN delete: {path}")
+            continue
+        try:
+            if os.path.isdir(path):
+                os.rmdir(path)
+            else:
                 os.remove(path)
-                deleted += 1
-                log(f"Deleted: {path}")
-            except FileNotFoundError:
-                continue
-            except OSError as e:
-                log(f"Erreur suppression {path}: {e}")
-                continue
-            if cfg.clean_empty_dirs:
-                cleanup_empty_dirs(target_root, root)
+            deleted += 1
+            log(f"Deleted: {path}")
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            log(f"Erreur suppression {path}: {e}")
+            continue
+        if cfg.clean_empty_dirs:
+            cleanup_empty_dirs(target_root, os.path.dirname(path))
 
     log(f"Scanned: {scanned}")
     log(f"Matched: {matched}")
