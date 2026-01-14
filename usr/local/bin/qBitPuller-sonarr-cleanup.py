@@ -2,6 +2,7 @@
 import os
 import sys
 import time
+import fcntl
 from dataclasses import dataclass
 from typing import Dict, List, Set, Tuple
 
@@ -134,6 +135,15 @@ def cleanup_empty_dirs(target_root: str, start_dir: str) -> None:
 
 def main() -> int:
     cfg = get_config()
+    lock_path = "/var/lock/qBitPuller-sonarr-cleanup.lock"
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    lock_fh = open(lock_path, "w", encoding="utf-8")
+    try:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("Deja en cours, on quitte")
+        return 0
+
     target_root = os.path.realpath(os.path.join(cfg.dest_root, cfg.sonarr_subdir))
 
     if not os.path.isdir(target_root):
