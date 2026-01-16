@@ -139,13 +139,20 @@ def is_under_root(path: str, root: str) -> bool:
         return False
 
 
+def is_same_dir(path: str, root: str) -> bool:
+    try:
+        return os.path.samefile(path, root)
+    except FileNotFoundError:
+        return False
+
+
 def cleanup_empty_dirs(target_root: str, start_dir: str) -> int:
     cur = start_dir
     deleted = 0
     while True:
         if not is_under_root(cur, target_root):
             return deleted
-        if os.path.samefile(cur, target_root):
+        if is_same_dir(cur, target_root):
             return deleted
         try:
             if os.listdir(cur):
@@ -213,7 +220,7 @@ def cleanup_nfo_and_empty_dirs(
 
             if not clean_empty_dirs:
                 continue
-            if os.path.samefile(root, target_root):
+            if is_same_dir(root, target_root):
                 continue
             try:
                 if os.listdir(root):
@@ -233,7 +240,7 @@ def cleanup_nfo_and_empty_dirs(
     while True:
         if not is_under_root(cur, target_root):
             break
-        if os.path.samefile(cur, target_root):
+        if is_same_dir(cur, target_root):
             break
         try:
             for entry in os.scandir(cur):
