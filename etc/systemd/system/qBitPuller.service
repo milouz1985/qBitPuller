@@ -3,7 +3,7 @@ Description=Seedbox puller (qBittorrent API + rclone)
 After=network-online.target
 Wants=network-online.target
 
-OnSuccess=qBitPuller-sonarr-cleanup.service
+OnSuccess=qBitPuller-sonarr-cleanup.service qBitPuller-radarr-cleanup.service
 
 [Service]
 Type=oneshot
