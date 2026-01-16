@@ -142,28 +142,8 @@ def is_under_root(path: str, root: str) -> bool:
 def is_same_dir(path: str, root: str) -> bool:
     try:
         return os.path.samefile(path, root)
-    except FileNotFoundError:
+    except (FileNotFoundError, OSError):
         return False
-
-
-def cleanup_empty_dirs(target_root: str, start_dir: str) -> int:
-    cur = start_dir
-    deleted = 0
-    while True:
-        if not is_under_root(cur, target_root):
-            return deleted
-        if is_same_dir(cur, target_root):
-            return deleted
-        try:
-            if os.listdir(cur):
-                return deleted
-            os.rmdir(cur)
-            deleted += 1
-        except FileNotFoundError:
-            return deleted
-        except OSError:
-            return deleted
-        cur = os.path.dirname(cur)
 
 
 def cleanup_nfo_and_empty_dirs(
@@ -206,7 +186,7 @@ def cleanup_nfo_and_empty_dirs(
                 if min_age_seconds and now - st.st_mtime < min_age_seconds:
                     continue
                 if dry_run:
-                    log(f"DRY_RUN delete: {path}")
+                    log(f"DRY_RUN: delete {path}")
                     continue
                 try:
                     os.remove(path)
@@ -226,7 +206,7 @@ def cleanup_nfo_and_empty_dirs(
                 if os.listdir(root):
                     continue
                 if dry_run:
-                    log(f"DRY_RUN rmdir: {root}")
+                    log(f"DRY_RUN: rmdir {root}")
                     continue
                 os.rmdir(root)
                 dirs_deleted += 1
@@ -236,6 +216,8 @@ def cleanup_nfo_and_empty_dirs(
             except OSError:
                 continue
 
+    # Remontee volontaire des parents pour capter les .nfo poses au niveau saison/serie
+    # (ex: "Season 01.nfo") hors du sous-arbre episode.
     cur = os.path.dirname(start_dir)
     while True:
         if not is_under_root(cur, target_root):
@@ -255,7 +237,7 @@ def cleanup_nfo_and_empty_dirs(
                 if min_age_seconds and now - st.st_mtime < min_age_seconds:
                     continue
                 if dry_run:
-                    log(f"DRY_RUN delete: {entry.path}")
+                    log(f"DRY_RUN: delete {entry.path}")
                     continue
                 try:
                     os.remove(entry.path)
@@ -267,7 +249,20 @@ def cleanup_nfo_and_empty_dirs(
                     log(f"Erreur suppression {entry.path}: {e}")
                     continue
             if clean_empty_dirs:
-                dirs_deleted += cleanup_empty_dirs(target_root, cur)
+                try:
+                    if os.listdir(cur):
+                        pass
+                    else:
+                        if dry_run:
+                            log(f"DRY_RUN: rmdir {cur}")
+                        else:
+                            os.rmdir(cur)
+                            dirs_deleted += 1
+                            log(f"Deleted dir: {cur}")
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    pass
         except FileNotFoundError:
             break
         except OSError:
@@ -283,87 +278,91 @@ def main() -> int:
     os.makedirs(os.path.dirname(lock_path), exist_ok=True)
     lock_fh = open(lock_path, "w", encoding="utf-8")
     try:
-        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        log("Deja en cours, on quitte")
+        try:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("Deja en cours, on quitte")
+            return 0
+
+        target_root = os.path.realpath(os.path.join(cfg.dest_root, cfg.sonarr_subdir))
+
+        if not os.path.isdir(target_root):
+            raise SystemExit(f"DEST_ROOT ou SONARR_SUBDIR invalide: dossier introuvable {target_root}")
+
+        log("Lecture Sonarr...")
+        client = SonarrClient(cfg.sonarr_url, cfg.sonarr_api_key, timeout=cfg.sonarr_timeout)
+        imported_paths = build_imported_paths(client, cfg.history_since_days)
+        log(f"Imports trouves via history/since: {len(imported_paths)}")
+
+        now = time.time()
+        min_age_seconds = max(0, cfg.min_age_minutes * 60)
+
+        scanned = 0
+        matched = 0
+        deleted = 0
+        skipped_too_young = 0
+
+        for src in imported_paths:
+            scanned += 1
+            path = os.path.realpath(src)
+            if not is_under_root(path, target_root):
+                continue
+            try:
+                st = os.stat(path)
+            except FileNotFoundError:
+                continue
+            if min_age_seconds and now - st.st_mtime < min_age_seconds:
+                skipped_too_young += 1
+                continue
+            matched += 1
+            if cfg.dry_run:
+                log(f"DRY_RUN: delete {path}")
+                continue
+            try:
+                if os.path.isdir(path):
+                    # Suppression volontairement non recursive (doit etre vide).
+                    os.rmdir(path)
+                else:
+                    os.remove(path)
+                deleted += 1
+                log(f"Deleted: {path}")
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                log(f"Erreur suppression {path}: {e}")
+                continue
+
+        log(f"Scanned: {scanned}")
+        log(f"Matched: {matched}")
+        log(f"Deleted: {deleted}")
+        log(f"Skipped (too young): {skipped_too_young}")
+
+        log("Nettoyage complementaire: .nfo + dossiers vides")
+        seen_dirs: Set[str] = set()
+        nfo_deleted = 0
+        dirs_deleted = 0
+        for src in imported_paths:
+            path = os.path.realpath(src)
+            if not is_under_root(path, target_root):
+                continue
+            start_dir = path if os.path.isdir(path) else os.path.dirname(path)
+            if start_dir in seen_dirs:
+                continue
+            seen_dirs.add(start_dir)
+            nfo_count, dir_count = cleanup_nfo_and_empty_dirs(
+                target_root=target_root,
+                start_dir=start_dir,
+                min_age_seconds=min_age_seconds,
+                dry_run=cfg.dry_run,
+                clean_empty_dirs=cfg.clean_empty_dirs,
+            )
+            nfo_deleted += nfo_count
+            dirs_deleted += dir_count
+        log(f"NFO deleted: {nfo_deleted}")
+        log(f"Dirs deleted: {dirs_deleted}")
         return 0
-
-    target_root = os.path.realpath(os.path.join(cfg.dest_root, cfg.sonarr_subdir))
-
-    if not os.path.isdir(target_root):
-        raise SystemExit(f"DEST_ROOT ou SONARR_SUBDIR invalide: dossier introuvable {target_root}")
-
-    log("Lecture Sonarr...")
-    client = SonarrClient(cfg.sonarr_url, cfg.sonarr_api_key, timeout=cfg.sonarr_timeout)
-    imported_paths = build_imported_paths(client, cfg.history_since_days)
-    log(f"Imports trouves via history/since: {len(imported_paths)}")
-
-    now = time.time()
-    min_age_seconds = max(0, cfg.min_age_minutes * 60)
-
-    scanned = 0
-    matched = 0
-    deleted = 0
-
-    for src in imported_paths:
-        scanned += 1
-        path = os.path.realpath(src)
-        if not is_under_root(path, target_root):
-            continue
-        try:
-            st = os.stat(path)
-        except FileNotFoundError:
-            continue
-        if min_age_seconds and now - st.st_mtime < min_age_seconds:
-            continue
-        matched += 1
-        if cfg.dry_run:
-            log(f"DRY_RUN delete: {path}")
-            continue
-        try:
-            if os.path.isdir(path):
-                os.rmdir(path)
-            else:
-                os.remove(path)
-            deleted += 1
-            log(f"Deleted: {path}")
-        except FileNotFoundError:
-            continue
-        except OSError as e:
-            log(f"Erreur suppression {path}: {e}")
-            continue
-        if cfg.clean_empty_dirs:
-            # Nettoyage immediat des parents du chemin supprime.
-            cleanup_empty_dirs(target_root, os.path.dirname(path))
-
-    log(f"Scanned: {scanned}")
-    log(f"Matched: {matched}")
-    log(f"Deleted: {deleted}")
-
-    log("Nettoyage complementaire: .nfo + dossiers vides")
-    seen_dirs: Set[str] = set()
-    nfo_deleted = 0
-    dirs_deleted = 0
-    for src in imported_paths:
-        path = os.path.realpath(src)
-        if not is_under_root(path, target_root):
-            continue
-        start_dir = path if os.path.isdir(path) else os.path.dirname(path)
-        if start_dir in seen_dirs:
-            continue
-        seen_dirs.add(start_dir)
-        nfo_count, dir_count = cleanup_nfo_and_empty_dirs(
-            target_root=target_root,
-            start_dir=start_dir,
-            min_age_seconds=min_age_seconds,
-            dry_run=cfg.dry_run,
-            clean_empty_dirs=cfg.clean_empty_dirs,
-        )
-        nfo_deleted += nfo_count
-        dirs_deleted += dir_count
-    log(f"NFO deleted: {nfo_deleted}")
-    log(f"Dirs deleted: {dirs_deleted}")
-    return 0
+    finally:
+        lock_fh.close()
 
 
 if __name__ == "__main__":
