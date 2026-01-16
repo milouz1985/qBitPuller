@@ -121,6 +121,7 @@ def build_imported_paths(client: SonarrClient, since_days: int) -> List[str]:
     paths: Set[str] = set()
     since_dt = datetime.now(timezone.utc) - timedelta(days=since_days)
     date_iso = since_dt.isoformat().replace("+00:00", "Z")
+    # On limite volontairement l'historique pour rester dans une fenetre recente.
     log(f"Requete Sonarr: /api/v3/history/since?date={date_iso}&eventType=downloadFolderImported")
     records = client.history_since(date_iso=date_iso, event_type="downloadFolderImported")
     for rec in records:
@@ -138,21 +139,23 @@ def is_under_root(path: str, root: str) -> bool:
         return False
 
 
-def cleanup_empty_dirs(target_root: str, start_dir: str) -> None:
+def cleanup_empty_dirs(target_root: str, start_dir: str) -> int:
     cur = start_dir
+    deleted = 0
     while True:
-        if not cur.startswith(target_root):
-            return
+        if not is_under_root(cur, target_root):
+            return deleted
         if os.path.samefile(cur, target_root):
-            return
+            return deleted
         try:
             if os.listdir(cur):
-                return
+                return deleted
             os.rmdir(cur)
+            deleted += 1
         except FileNotFoundError:
-            return
+            return deleted
         except OSError:
-            return
+            return deleted
         cur = os.path.dirname(cur)
 
 
@@ -171,6 +174,7 @@ def cleanup_nfo_and_empty_dirs(
         return 0, 0
     scan_dir = start_dir
     while not os.path.isdir(scan_dir):
+        # Remonter jusqu'au premier parent existant pour permettre le nettoyage.
         parent = os.path.dirname(scan_dir)
         if parent == scan_dir:
             scan_dir = ""
@@ -207,13 +211,13 @@ def cleanup_nfo_and_empty_dirs(
                     log(f"Erreur suppression {path}: {e}")
                     continue
 
-            if not clean_empty_dirs:
+        if not clean_empty_dirs:
+            continue
+        if os.path.samefile(root, target_root):
+            continue
+        try:
+            if os.listdir(root):
                 continue
-            if os.path.realpath(root) == target_root:
-                continue
-            try:
-                if os.listdir(root):
-                    continue
                 if dry_run:
                     log(f"DRY_RUN rmdir: {root}")
                     continue
@@ -229,7 +233,7 @@ def cleanup_nfo_and_empty_dirs(
     while True:
         if not is_under_root(cur, target_root):
             break
-        if os.path.realpath(cur) == target_root:
+        if os.path.samefile(cur, target_root):
             break
         try:
             for entry in os.scandir(cur):
@@ -256,7 +260,7 @@ def cleanup_nfo_and_empty_dirs(
                     log(f"Erreur suppression {entry.path}: {e}")
                     continue
             if clean_empty_dirs:
-                cleanup_empty_dirs(target_root, cur)
+                dirs_deleted += cleanup_empty_dirs(target_root, cur)
         except FileNotFoundError:
             break
         except OSError:
@@ -322,6 +326,7 @@ def main() -> int:
             log(f"Erreur suppression {path}: {e}")
             continue
         if cfg.clean_empty_dirs:
+            # Nettoyage immediat des parents du chemin supprime.
             cleanup_empty_dirs(target_root, os.path.dirname(path))
 
     log(f"Scanned: {scanned}")
