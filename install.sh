@@ -9,6 +9,7 @@ LEGACY_ENV="/etc/qBitPuller.env"
 
 install -m 0755 "$ROOT_DIR/usr/local/bin/qBitPuller.py" /usr/local/bin/qBitPuller.py
 install -m 0755 "$ROOT_DIR/usr/local/bin/qBitPuller-sonarr-cleanup.py" /usr/local/bin/qBitPuller-sonarr-cleanup.py
+install -m 0755 "$ROOT_DIR/usr/local/bin/qBitPuller-radarr-cleanup.py" /usr/local/bin/qBitPuller-radarr-cleanup.py
 
 install -d -o root -g root -m 0700 "$ENV_DIR"
 
@@ -28,6 +29,7 @@ fi
 
 install -m 0644 "$ROOT_DIR/etc/systemd/system/qBitPuller.service" /etc/systemd/system/qBitPuller.service
 install -m 0644 "$ROOT_DIR/etc/systemd/system/qBitPuller-sonarr-cleanup.service" /etc/systemd/system/qBitPuller-sonarr-cleanup.service
+install -m 0644 "$ROOT_DIR/etc/systemd/system/qBitPuller-radarr-cleanup.service" /etc/systemd/system/qBitPuller-radarr-cleanup.service
 install -m 0644 "$ROOT_DIR/etc/systemd/system/qBitPuller.timer" /etc/systemd/system/qBitPuller.timer
 
 systemctl daemon-reload

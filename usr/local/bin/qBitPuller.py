@@ -110,6 +110,12 @@ class QbClient:
         r = self.s.post(url, data={"hashes": hashes, "tags": tags}, timeout=self.timeout)
         r.raise_for_status()
 
+    def torrent_files(self, hash_: str) -> List[Dict[str, Any]]:
+        url = self.api + "torrents/files"
+        r = self.s.get(url, params={"hash": hash_}, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json()
+
 
 def is_done(t: Dict[str, Any]) -> bool:
     # progress == 1.0 est le critère le plus simple et fiable
@@ -148,14 +154,17 @@ def build_src_path(cfg: Config, content_path: str) -> str:
     return ""
 
 
-def run_rclone_copy(cfg: Config, src: str, dst: str) -> None:
-    os.makedirs(dst, exist_ok=True)
+def run_rclone_copy(cfg: Config, src: str, dst: str, dst_is_file: bool = False) -> None:
+    if dst_is_file:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+    else:
+        os.makedirs(dst, exist_ok=True)
 
     cmd = [
         "timeout",
         "90m",
         "rclone",
-        "copy",
+        "copyto" if dst_is_file else "copy",
         src,
         dst,
         "--transfers",
@@ -235,10 +244,26 @@ def main() -> int:
         if not src:
             log(f"Skip {name} car content_path ne matche pas RCLONE_SRC_ROOT: {content_path}")
             continue
-        dst = os.path.join(cfg.dest_root, cat, name)
 
-        log(f"Copy {cat}: {name}")
-        run_rclone_copy(cfg, src, dst)
+        single_file_name = ""
+        try:
+            files = qb.torrent_files(h)
+        except Exception as e:
+            debug_log(cfg, f"Impossible de recuperer fichiers pour {name}: {e}")
+            files = None
+        if files and len(files) == 1:
+            rel_name = (files[0].get("name") or "").strip()
+            if rel_name and "/" not in rel_name and "\\" not in rel_name:
+                single_file_name = rel_name
+
+        if single_file_name:
+            dst = os.path.join(cfg.dest_root, cat, single_file_name)
+            log(f"Copy (single file) {cat}: {name}")
+            run_rclone_copy(cfg, src, dst, dst_is_file=True)
+        else:
+            dst = os.path.join(cfg.dest_root, cat, name)
+            log(f"Copy {cat}: {name}")
+            run_rclone_copy(cfg, src, dst)
 
         log(f"Tag {cfg.pulled_tag}: {name}")
         qb.add_tags(hashes=h, tags=cfg.pulled_tag)
