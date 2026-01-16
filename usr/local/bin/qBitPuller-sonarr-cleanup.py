@@ -216,6 +216,44 @@ def cleanup_nfo_and_empty_dirs(
         except OSError:
             continue
 
+    cur = os.path.dirname(start_dir)
+    while True:
+        if not is_under_root(cur, target_root):
+            break
+        if os.path.samefile(cur, target_root):
+            break
+        try:
+            for entry in os.scandir(cur):
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                if not entry.name.lower().endswith(".nfo"):
+                    continue
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                except FileNotFoundError:
+                    continue
+                if min_age_seconds and now - st.st_mtime < min_age_seconds:
+                    continue
+                if dry_run:
+                    log(f"DRY_RUN delete: {entry.path}")
+                    continue
+                try:
+                    os.remove(entry.path)
+                    nfo_deleted += 1
+                    log(f"Deleted: {entry.path}")
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    log(f"Erreur suppression {entry.path}: {e}")
+                    continue
+            if clean_empty_dirs:
+                cleanup_empty_dirs(target_root, cur)
+        except FileNotFoundError:
+            break
+        except OSError:
+            pass
+        cur = os.path.dirname(cur)
+
     return nfo_deleted, dirs_deleted
 
 
