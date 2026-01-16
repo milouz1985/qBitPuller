@@ -169,58 +169,67 @@ def cleanup_nfo_and_empty_dirs(
 
     if not is_under_root(start_dir, target_root):
         return 0, 0
-    if not os.path.isdir(start_dir):
-        return 0, 0
+    scan_dir = start_dir
+    while not os.path.isdir(scan_dir):
+        parent = os.path.dirname(scan_dir)
+        if parent == scan_dir:
+            scan_dir = ""
+            break
+        scan_dir = parent
+        if not is_under_root(scan_dir, target_root):
+            scan_dir = ""
+            break
 
-    for root, dirs, files in os.walk(start_dir, topdown=False):
-        if not is_under_root(root, target_root):
-            continue
-        for name in files:
-            if not name.lower().endswith(".nfo"):
+    if scan_dir:
+        for root, dirs, files in os.walk(scan_dir, topdown=False):
+            if not is_under_root(root, target_root):
                 continue
-            path = os.path.join(root, name)
+            for name in files:
+                if not name.lower().endswith(".nfo"):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    st = os.stat(path)
+                except FileNotFoundError:
+                    continue
+                if min_age_seconds and now - st.st_mtime < min_age_seconds:
+                    continue
+                if dry_run:
+                    log(f"DRY_RUN delete: {path}")
+                    continue
+                try:
+                    os.remove(path)
+                    nfo_deleted += 1
+                    log(f"Deleted: {path}")
+                except FileNotFoundError:
+                    continue
+                except OSError as e:
+                    log(f"Erreur suppression {path}: {e}")
+                    continue
+
+            if not clean_empty_dirs:
+                continue
+            if os.path.realpath(root) == target_root:
+                continue
             try:
-                st = os.stat(path)
+                if os.listdir(root):
+                    continue
+                if dry_run:
+                    log(f"DRY_RUN rmdir: {root}")
+                    continue
+                os.rmdir(root)
+                dirs_deleted += 1
+                log(f"Deleted dir: {root}")
             except FileNotFoundError:
                 continue
-            if min_age_seconds and now - st.st_mtime < min_age_seconds:
+            except OSError:
                 continue
-            if dry_run:
-                log(f"DRY_RUN delete: {path}")
-                continue
-            try:
-                os.remove(path)
-                nfo_deleted += 1
-                log(f"Deleted: {path}")
-            except FileNotFoundError:
-                continue
-            except OSError as e:
-                log(f"Erreur suppression {path}: {e}")
-                continue
-
-        if not clean_empty_dirs:
-            continue
-        if os.path.samefile(root, target_root):
-            continue
-        try:
-            if os.listdir(root):
-                continue
-            if dry_run:
-                log(f"DRY_RUN rmdir: {root}")
-                continue
-            os.rmdir(root)
-            dirs_deleted += 1
-            log(f"Deleted dir: {root}")
-        except FileNotFoundError:
-            continue
-        except OSError:
-            continue
 
     cur = os.path.dirname(start_dir)
     while True:
         if not is_under_root(cur, target_root):
             break
-        if os.path.samefile(cur, target_root):
+        if os.path.realpath(cur) == target_root:
             break
         try:
             for entry in os.scandir(cur):
