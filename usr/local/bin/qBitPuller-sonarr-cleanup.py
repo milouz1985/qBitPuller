@@ -211,23 +211,23 @@ def cleanup_nfo_and_empty_dirs(
                     log(f"Erreur suppression {path}: {e}")
                     continue
 
-        if not clean_empty_dirs:
-            continue
-        if os.path.samefile(root, target_root):
-            continue
-        try:
-            if os.listdir(root):
+            if not clean_empty_dirs:
                 continue
-            if dry_run:
-                log(f"DRY_RUN rmdir: {root}")
+            if os.path.samefile(root, target_root):
                 continue
-            os.rmdir(root)
-            dirs_deleted += 1
-            log(f"Deleted dir: {root}")
-        except FileNotFoundError:
-            continue
-        except OSError:
-            continue
+            try:
+                if os.listdir(root):
+                    continue
+                if dry_run:
+                    log(f"DRY_RUN rmdir: {root}")
+                    continue
+                os.rmdir(root)
+                dirs_deleted += 1
+                log(f"Deleted dir: {root}")
+            except FileNotFoundError:
+                continue
+            except OSError:
+                continue
 
     cur = os.path.dirname(start_dir)
     while True:
