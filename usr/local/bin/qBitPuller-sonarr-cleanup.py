@@ -156,6 +156,69 @@ def cleanup_empty_dirs(target_root: str, start_dir: str) -> None:
         cur = os.path.dirname(cur)
 
 
+def cleanup_nfo_and_empty_dirs(
+    target_root: str,
+    start_dir: str,
+    min_age_seconds: int,
+    dry_run: bool,
+    clean_empty_dirs: bool,
+) -> tuple[int, int]:
+    now = time.time()
+    nfo_deleted = 0
+    dirs_deleted = 0
+
+    if not is_under_root(start_dir, target_root):
+        return 0, 0
+    if not os.path.isdir(start_dir):
+        return 0, 0
+
+    for root, dirs, files in os.walk(start_dir, topdown=False):
+        if not is_under_root(root, target_root):
+            continue
+        for name in files:
+            if not name.lower().endswith(".nfo"):
+                continue
+            path = os.path.join(root, name)
+            try:
+                st = os.stat(path)
+            except FileNotFoundError:
+                continue
+            if min_age_seconds and now - st.st_mtime < min_age_seconds:
+                continue
+            if dry_run:
+                log(f"DRY_RUN delete: {path}")
+                continue
+            try:
+                os.remove(path)
+                nfo_deleted += 1
+                log(f"Deleted: {path}")
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                log(f"Erreur suppression {path}: {e}")
+                continue
+
+        if not clean_empty_dirs:
+            continue
+        if os.path.samefile(root, target_root):
+            continue
+        try:
+            if os.listdir(root):
+                continue
+            if dry_run:
+                log(f"DRY_RUN rmdir: {root}")
+                continue
+            os.rmdir(root)
+            dirs_deleted += 1
+            log(f"Deleted dir: {root}")
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+
+    return nfo_deleted, dirs_deleted
+
+
 def main() -> int:
     cfg = get_config()
     lock_path = "/var/lock/qBitPuller-sonarr-cleanup.lock"
@@ -217,6 +280,30 @@ def main() -> int:
     log(f"Scanned: {scanned}")
     log(f"Matched: {matched}")
     log(f"Deleted: {deleted}")
+
+    log("Nettoyage complementaire: .nfo + dossiers vides")
+    seen_dirs: Set[str] = set()
+    nfo_deleted = 0
+    dirs_deleted = 0
+    for src in imported_paths:
+        path = os.path.realpath(src)
+        if not is_under_root(path, target_root):
+            continue
+        start_dir = path if os.path.isdir(path) else os.path.dirname(path)
+        if start_dir in seen_dirs:
+            continue
+        seen_dirs.add(start_dir)
+        nfo_count, dir_count = cleanup_nfo_and_empty_dirs(
+            target_root=target_root,
+            start_dir=start_dir,
+            min_age_seconds=min_age_seconds,
+            dry_run=cfg.dry_run,
+            clean_empty_dirs=cfg.clean_empty_dirs,
+        )
+        nfo_deleted += nfo_count
+        dirs_deleted += dir_count
+    log(f"NFO deleted: {nfo_deleted}")
+    log(f"Dirs deleted: {dirs_deleted}")
     return 0
 
 
