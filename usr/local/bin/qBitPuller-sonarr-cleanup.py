@@ -218,16 +218,16 @@ def cleanup_nfo_and_empty_dirs(
         try:
             if os.listdir(root):
                 continue
-                if dry_run:
-                    log(f"DRY_RUN rmdir: {root}")
-                    continue
-                os.rmdir(root)
-                dirs_deleted += 1
-                log(f"Deleted dir: {root}")
-            except FileNotFoundError:
+            if dry_run:
+                log(f"DRY_RUN rmdir: {root}")
                 continue
-            except OSError:
-                continue
+            os.rmdir(root)
+            dirs_deleted += 1
+            log(f"Deleted dir: {root}")
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
 
     cur = os.path.dirname(start_dir)
     while True:
