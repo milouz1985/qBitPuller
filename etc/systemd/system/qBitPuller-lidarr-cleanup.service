@@ -1,0 +1,12 @@
+[Unit]
+Description=Lidarr cleanup (remove imported files from DEST_ROOT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/qBitPuller/qBitPuller.env
+User=qbitpuller
+Group=media
+UMask=0002
+ExecStart=/usr/bin/python3 /usr/local/bin/qBitPuller-lidarr-cleanup.py
