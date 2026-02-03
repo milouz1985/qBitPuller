@@ -140,8 +140,26 @@ def cleanup_nfo_and_empty_dirs(
     clean_empty_dirs: bool,
 ) -> tuple[int, int]:
     now = time.time()
-    nfo_deleted = 0
+    aux_deleted = 0
     dirs_deleted = 0
+    delete_exts = {
+        ".nfo",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".log",
+        ".cue",
+        ".m3u",
+        ".m3u8",
+        ".sfv",
+        ".txt",
+        ".md",
+        ".url",
+    }
+    parent_exts = {".nfo"}
 
     if not is_under_root(start_dir, target_root):
         return 0, 0
@@ -162,7 +180,8 @@ def cleanup_nfo_and_empty_dirs(
             if not is_under_root(root, target_root):
                 continue
             for name in files:
-                if not name.lower().endswith(".nfo"):
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in delete_exts:
                     continue
                 path = os.path.join(root, name)
                 try:
@@ -176,7 +195,7 @@ def cleanup_nfo_and_empty_dirs(
                     continue
                 try:
                     os.remove(path)
-                    nfo_deleted += 1
+                    aux_deleted += 1
                     log(f"Deleted: {path}")
                 except FileNotFoundError:
                     continue
@@ -213,7 +232,8 @@ def cleanup_nfo_and_empty_dirs(
             for entry in os.scandir(cur):
                 if not entry.is_file(follow_symlinks=False):
                     continue
-                if not entry.name.lower().endswith(".nfo"):
+                ext = os.path.splitext(entry.name)[1].lower()
+                if ext not in parent_exts:
                     continue
                 try:
                     st = entry.stat(follow_symlinks=False)
@@ -226,7 +246,7 @@ def cleanup_nfo_and_empty_dirs(
                     continue
                 try:
                     os.remove(entry.path)
-                    nfo_deleted += 1
+                    aux_deleted += 1
                     log(f"Deleted: {entry.path}")
                 except FileNotFoundError:
                     continue
@@ -254,7 +274,7 @@ def cleanup_nfo_and_empty_dirs(
             pass
         cur = os.path.dirname(cur)
 
-    return nfo_deleted, dirs_deleted
+    return aux_deleted, dirs_deleted
 
 
 def main() -> int:
@@ -322,9 +342,9 @@ def main() -> int:
         log(f"Deleted: {deleted}")
         log(f"Skipped (too young): {skipped_too_young}")
 
-        log("Nettoyage complementaire: .nfo + dossiers vides")
+        log("Nettoyage complementaire: fichiers annexes + dossiers vides")
         seen_dirs: Set[str] = set()
-        nfo_deleted = 0
+        aux_deleted = 0
         dirs_deleted = 0
         for src in imported_paths:
             path = os.path.realpath(src)
@@ -334,16 +354,16 @@ def main() -> int:
             if start_dir in seen_dirs:
                 continue
             seen_dirs.add(start_dir)
-            nfo_count, dir_count = cleanup_nfo_and_empty_dirs(
+            aux_count, dir_count = cleanup_nfo_and_empty_dirs(
                 target_root=target_root,
                 start_dir=start_dir,
                 min_age_seconds=min_age_seconds,
                 dry_run=cfg.dry_run,
                 clean_empty_dirs=cfg.clean_empty_dirs,
             )
-            nfo_deleted += nfo_count
+            aux_deleted += aux_count
             dirs_deleted += dir_count
-        log(f"NFO deleted: {nfo_deleted}")
+        log(f"Aux deleted: {aux_deleted}")
         log(f"Dirs deleted: {dirs_deleted}")
         return 0
     finally:
