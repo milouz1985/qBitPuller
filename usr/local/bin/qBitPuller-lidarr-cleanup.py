@@ -108,11 +108,11 @@ def build_imported_paths(client: LidarrClient, since_days: int) -> List[str]:
     since_dt = datetime.now(timezone.utc) - timedelta(days=since_days)
     date_iso = since_dt.isoformat().replace("+00:00", "Z")
     # On limite volontairement l'historique pour rester dans une fenetre recente.
-    log(f"Requete Lidarr: /api/v1/history/since?date={date_iso}&eventType=downloadImported")
-    records = client.history_since(date_iso=date_iso, event_type="downloadImported")
+    log(f"Requete Lidarr: /api/v1/history/since?date={date_iso}&eventType=trackFileImported")
+    records = client.history_since(date_iso=date_iso, event_type="trackFileImported")
     for rec in records:
         rec_data = rec.get("data") or {}
-        src = rec_data.get("droppedPath") or rec_data.get("sourcePath") or ""
+        src = rec_data.get("droppedPath") or ""
         if src:
             paths.add(src)
     return sorted(paths)
